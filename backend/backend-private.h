@@ -317,6 +317,12 @@ extern ssize_t		backendRunLoop(int print_fd, int device_fd, int snmp_fd,
 extern int		backendSNMPSupplies(int snmp_fd, http_addr_t *addr,
 			                    int *page_count,
 					    int *printer_state);
+extern int		backendSNMPGetState(int snmp_fd, http_addr_t *addr,
+			                    int *page_count,
+								int *printer_state,
+								char **new_supply_state_str,
+								char **new_state_str,
+								char *marker_levels);
 extern int		backendWaitLoop(int snmp_fd, http_addr_t *addr,
 			                int use_bc, _cups_sccb_t side_cb);
 

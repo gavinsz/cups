@@ -227,6 +227,16 @@ testsupplies:	testsupplies.o libbackend.a ../cups/$(LIBCUPSSTATIC)
 
 
 #
+# printer_status
+#
+
+printer_status:	printer_status.o libbackend.a ../cups/$(LIBCUPSSTATIC)
+	echo Linking $@...
+	$(LD_CC) $(ALL_LDFLAGS) -o printer_status printer_status.o libbackend.a \
+		$(LINKCUPSSTATIC)
+	$(CODE_SIGN) -s "$(CODE_SIGN_IDENTITY)" $@
+
+#
 # libbackend.a
 #
 

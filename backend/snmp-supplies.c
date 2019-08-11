@@ -39,6 +39,13 @@
 #define CUPS_SNMP_NONE		0x0000
 #define CUPS_SNMP_CAPACITY	0x0001	/* Supply levels reported as percentages */
 
+//#define DEBUG_ENABLE
+#ifdef    DEBUG_ENABLE
+#define DEBUG(fmt,args...)    printf(fmt ,##args)
+#else
+#define DEBUG(fmt,args...)
+#endif    /* DEBUG */
+
 
 /*
  * Local structures...
@@ -323,14 +330,14 @@ backendSNMPSupplies(
         strlcpy(ptr, "-1", sizeof(value) - (size_t)(ptr - value));
     }
 
-    fprintf(stderr, "ATTR: marker-levels=%s\n", value);
+    DEBUG("ATTR: marker-levels=%s\n", value);
 
     if (supply_state < 0)
       change_state = 0xffff;
     else
       change_state = supply_state ^ new_supply_state;
 
-    fprintf(stderr, "DEBUG: new_supply_state=%x, change_state=%x\n",
+    DEBUG("DEBUG: new_supply_state=%x, change_state=%x\n",
             new_supply_state, change_state);
 
     for (i = 0;
@@ -338,7 +345,7 @@ backendSNMPSupplies(
          i ++)
       if (change_state & supply_states[i].bit)
       {
-	fprintf(stderr, "STATE: %c%s\n",
+	DEBUG("STATE: %c%s\n",
 		(new_supply_state & supply_states[i].bit) ? '+' : '-',
 		supply_states[i].keyword);
       }
@@ -371,7 +378,7 @@ backendSNMPSupplies(
     else
       change_state = current_state ^ new_state;
 
-    fprintf(stderr, "DEBUG: new_state=%x, change_state=%x\n", new_state,
+    DEBUG("DEBUG: new_state=%x, change_state=%x\n", new_state,
             change_state);
 
     for (i = 0;
@@ -379,9 +386,243 @@ backendSNMPSupplies(
          i ++)
       if (change_state & printer_states[i].bit)
       {
-	fprintf(stderr, "STATE: %c%s\n",
+	DEBUG("STATE: %c%s\n",
 		(new_state & printer_states[i].bit) ? '+' : '-',
 		printer_states[i].keyword);
+      }
+
+    current_state = new_state;
+
+   /*
+    * Get the current printer state...
+    */
+
+    if (printer_state)
+    {
+      if (!_cupsSNMPWrite(snmp_fd, addr, CUPS_SNMP_VERSION_1,
+			 _cupsSNMPDefaultCommunity(), CUPS_ASN1_GET_REQUEST, 1,
+			 hrPrinterStatus))
+	return (-1);
+
+      if (!_cupsSNMPRead(snmp_fd, &packet, CUPS_SUPPLY_TIMEOUT) ||
+	  packet.object_type != CUPS_ASN1_INTEGER)
+	return (-1);
+
+      *printer_state = packet.object_value.integer;
+    }
+
+   /*
+    * Get the current page count...
+    */
+
+    if (page_count)
+    {
+      if (!_cupsSNMPWrite(snmp_fd, addr, CUPS_SNMP_VERSION_1,
+			 _cupsSNMPDefaultCommunity(), CUPS_ASN1_GET_REQUEST, 1,
+			 prtMarkerLifeCount))
+	return (-1);
+
+      if (!_cupsSNMPRead(snmp_fd, &packet, CUPS_SUPPLY_TIMEOUT) ||
+	  packet.object_type != CUPS_ASN1_COUNTER)
+	return (-1);
+
+      *page_count = packet.object_value.counter;
+    }
+
+    return (0);
+  }
+  else
+    return (-1);
+}
+
+int					/* O - 0 on success, -1 on error */
+backendSNMPGetState(
+    int         snmp_fd,		/* I - SNMP socket */
+    http_addr_t *addr,			/* I - Printer address */
+    int         *page_count,		/* O - Page count */
+    int         *printer_state,		/* O - Printer state */
+	char        **new_supply_state_str,   /* O - Printer new supply state str */
+	char        **new_state_str,          /* O - Printer new state str */
+	char        *marker_levels)           /* O - Printer marker-levels string */
+{
+  if (!httpAddrEqual(addr, &current_addr))
+    backend_init_supplies(snmp_fd, addr);
+  else if (num_supplies > 0)
+    _cupsSNMPWalk(snmp_fd, &current_addr, CUPS_SNMP_VERSION_1,
+		  _cupsSNMPDefaultCommunity(), prtMarkerSuppliesLevel,
+		  CUPS_SUPPLY_TIMEOUT, backend_walk_cb, NULL);
+
+  if (page_count)
+    *page_count = -1;
+
+  if (printer_state)
+    *printer_state = -1;
+
+  if (num_supplies > 0)
+  {
+    int		i,			/* Looping var */
+		percent,		/* Percent full */
+		new_state,		/* New state value */
+		change_state,		/* State change */
+		new_supply_state = 0;	/* Supply state */
+    //char	value[CUPS_MAX_SUPPLIES * 4];
+					/* marker-levels value string */
+        char *value = marker_levels;
+		char *ptr;			/* Pointer into value string */
+    cups_snmp_t	packet;			/* SNMP response packet */
+
+   /*
+    * Generate the marker-levels value string...
+    */
+
+    for (i = 0, ptr = value; i < num_supplies; i ++, ptr += strlen(ptr))
+    {
+      if (supplies[i].max_capacity > 0 && supplies[i].level >= 0)
+	percent = 100 * supplies[i].level / supplies[i].max_capacity;
+      else if (supplies[i].level >= 0 && supplies[i].level <= 100 &&
+               (quirks & CUPS_SNMP_CAPACITY))
+        percent = supplies[i].level;
+      else
+        percent = 50;
+
+      if (supplies[i].sclass == CUPS_TC_receptacleThatIsFilled)
+        percent = 100 - percent;
+
+      if (percent <= 5)
+      {
+        switch (supplies[i].type)
+        {
+          case CUPS_TC_toner :
+          case CUPS_TC_tonerCartridge :
+              if (percent <= 1)
+                new_supply_state |= CUPS_TONER_EMPTY;
+              else
+                new_supply_state |= CUPS_TONER_LOW;
+              break;
+          case CUPS_TC_ink :
+          case CUPS_TC_inkCartridge :
+          case CUPS_TC_inkRibbon :
+          case CUPS_TC_solidWax :
+          case CUPS_TC_ribbonWax :
+              if (percent <= 1)
+                new_supply_state |= CUPS_MARKER_SUPPLY_EMPTY;
+              else
+                new_supply_state |= CUPS_MARKER_SUPPLY_LOW;
+              break;
+          case CUPS_TC_developer :
+              if (percent <= 1)
+                new_supply_state |= CUPS_DEVELOPER_EMPTY;
+              else
+                new_supply_state |= CUPS_DEVELOPER_LOW;
+              break;
+          case CUPS_TC_coronaWire :
+          case CUPS_TC_fuser :
+          case CUPS_TC_opc :
+          case CUPS_TC_transferUnit :
+              if (percent <= 1)
+                new_supply_state |= CUPS_OPC_LIFE_OVER;
+              else
+                new_supply_state |= CUPS_OPC_NEAR_EOL;
+              break;
+#if 0 /* Because no two vendors report waste containers the same, disable SNMP reporting of same */
+          case CUPS_TC_wasteInk :
+          case CUPS_TC_wastePaper :
+          case CUPS_TC_wasteToner :
+          case CUPS_TC_wasteWater :
+          case CUPS_TC_wasteWax :
+              if (percent <= 1)
+                new_supply_state |= CUPS_WASTE_FULL;
+              else
+                new_supply_state |= CUPS_WASTE_ALMOST_FULL;
+              break;
+#endif /* 0 */
+          case CUPS_TC_cleanerUnit :
+          case CUPS_TC_fuserCleaningPad :
+              if (percent <= 1)
+                new_supply_state |= CUPS_CLEANER_LIFE_OVER;
+              else
+                new_supply_state |= CUPS_CLEANER_NEAR_EOL;
+              break;
+        }
+      }
+
+      if (i)
+        *ptr++ = ',';
+
+      if ((supplies[i].max_capacity > 0 || (quirks & CUPS_SNMP_CAPACITY)) &&
+          supplies[i].level >= 0)
+        snprintf(ptr, sizeof(value) - (size_t)(ptr - value), "%d", percent);
+      else
+        strlcpy(ptr, "-1", sizeof(value) - (size_t)(ptr - value));
+    }
+
+    DEBUG("ATTR: marker-levels=%s\n", value);
+
+    if (supply_state < 0)
+      change_state = 0xffff;
+    else
+      change_state = supply_state ^ new_supply_state;
+
+    DEBUG("DEBUG: new_supply_state=%x, change_state=%x\n",
+            new_supply_state, change_state);
+
+    for (i = 0;
+         i < (int)(sizeof(supply_states) / sizeof(supply_states[0]));
+         i ++)
+      if (change_state & supply_states[i].bit)
+      {
+    	  DEBUG("STATE: %c%s\n",
+    			(new_supply_state & supply_states[i].bit) ? '+' : '-',
+    			supply_states[i].keyword);
+			if ((NULL != new_supply_state_str) &&
+				(new_supply_state & supply_states[i].bit)){
+				*new_supply_state_str = (char*)supply_states[i].keyword;
+			}
+      }
+
+    supply_state = new_supply_state;
+
+   /*
+    * Get the current printer status bits...
+    */
+
+    if (!_cupsSNMPWrite(snmp_fd, addr, CUPS_SNMP_VERSION_1,
+                       _cupsSNMPDefaultCommunity(), CUPS_ASN1_GET_REQUEST, 1,
+                       hrPrinterDetectedErrorState))
+      return (-1);
+
+    if (!_cupsSNMPRead(snmp_fd, &packet, CUPS_SUPPLY_TIMEOUT) ||
+        packet.object_type != CUPS_ASN1_OCTET_STRING)
+      return (-1);
+
+    if (packet.object_value.string.num_bytes == 2)
+      new_state = (packet.object_value.string.bytes[0] << 8) |
+		  packet.object_value.string.bytes[1];
+    else if (packet.object_value.string.num_bytes == 1)
+      new_state = (packet.object_value.string.bytes[0] << 8);
+    else
+      new_state = 0;
+
+    if (current_state < 0)
+      change_state = 0xffff;
+    else
+      change_state = current_state ^ new_state;
+
+    DEBUG("DEBUG: new_state=%x, change_state=%x\n", new_state,
+            change_state);
+
+    for (i = 0;
+         i < (int)(sizeof(printer_states) / sizeof(printer_states[0]));
+         i ++)
+      if (change_state & printer_states[i].bit)
+      {
+	DEBUG("STATE: %c%s\n",
+		(new_state & printer_states[i].bit) ? '+' : '-',
+		printer_states[i].keyword);
+		if ((NULL != new_state_str) &&
+			(new_state & printer_states[i].bit)){
+			*new_state_str = (char*)printer_states[i].keyword;
+		}
       }
 
     current_state = new_state;
@@ -512,12 +753,13 @@ backend_init_supplies(
   if (!*community)
     return;
 
+  if (NULL != getenv("PPD")){
   if ((ppd = ppdOpenFile(getenv("PPD"))) == NULL ||
       ((ppdattr = ppdFindAttr(ppd, "cupsSNMPSupplies", NULL)) != NULL &&
        ppdattr->value && _cups_strcasecmp(ppdattr->value, "true")))
   {
     ppdClose(ppd);
-    return;
+    //return;
   }
 
   if ((ppdattr = ppdFindAttr(ppd, "cupsSNMPQuirks", NULL)) != NULL)
@@ -527,7 +769,7 @@ backend_init_supplies(
   }
 
   ppdClose(ppd);
-
+  }
  /*
   * Get the device description...
   */
@@ -547,7 +789,7 @@ backend_init_supplies(
     strlcpy(description, (char *)packet.object_value.string.bytes,
             sizeof(description));
 
-  fprintf(stderr, "DEBUG2: hrDeviceDesc=\"%s\"\n", description);
+  DEBUG("DEBUG2: hrDeviceDesc=\"%s\"\n", description);
 
  /*
   * See if we have already queried this device...
@@ -617,13 +859,12 @@ backend_init_supplies(
     if (!_cupsSNMPRead(snmp_fd, &packet, CUPS_SUPPLY_TIMEOUT) ||
 	packet.object_type != CUPS_ASN1_INTEGER)
     {
-      fprintf(stderr,
-              "DEBUG: prtGeneralCurrentLocalization type is %x, expected %x!\n",
+        DEBUG("DEBUG: prtGeneralCurrentLocalization type is %x, expected %x!\n",
 	      packet.object_type, CUPS_ASN1_INTEGER);
       return;
     }
 
-    fprintf(stderr, "DEBUG2: prtGeneralCurrentLocalization=%d\n",
+    DEBUG("DEBUG2: prtGeneralCurrentLocalization=%d\n",
             packet.object_value.integer);
 
     _cupsSNMPCopyOID(oid, prtLocalizationCharacterSet, CUPS_SNMP_MAX_OID);
@@ -638,13 +879,13 @@ backend_init_supplies(
     if (!_cupsSNMPRead(snmp_fd, &packet, CUPS_SUPPLY_TIMEOUT) ||
 	packet.object_type != CUPS_ASN1_INTEGER)
     {
-      fprintf(stderr,
+      DEBUG(
               "DEBUG: prtLocalizationCharacterSet type is %x, expected %x!\n",
 	      packet.object_type, CUPS_ASN1_INTEGER);
       return;
     }
 
-    fprintf(stderr, "DEBUG2: prtLocalizationCharacterSet=%d\n",
+    DEBUG("DEBUG2: prtLocalizationCharacterSet=%d\n",
 	    packet.object_value.integer);
     charset = packet.object_value.integer;
   }
@@ -705,7 +946,7 @@ backend_init_supplies(
     strlcpy(ptr, supplies[i].color, sizeof(value) - (size_t)(ptr - value));
   }
 
-  fprintf(stderr, "ATTR: marker-colors=%s\n", value);
+  DEBUG("ATTR: marker-colors=%s\n", value);
 
  /*
   * Output the marker-names attribute (the double quoting is necessary to deal
@@ -736,7 +977,7 @@ backend_init_supplies(
 
   *ptr = '\0';
 
-  fprintf(stderr, "ATTR: marker-names=%s\n", value);
+  DEBUG("ATTR: marker-names=%s\n", value);
 
  /*
   * Output the marker-types attribute...
@@ -755,7 +996,7 @@ backend_init_supplies(
       strlcpy(ptr, types[type - CUPS_TC_other], sizeof(value) - (size_t)(ptr - value));
   }
 
-  fprintf(stderr, "ATTR: marker-types=%s\n", value);
+  DEBUG("ATTR: marker-types=%s\n", value);
 }
 
 
@@ -809,7 +1050,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
 
     i = packet->object_name[prtMarkerColorantValueOffset];
 
-    fprintf(stderr, "DEBUG2: prtMarkerColorantValue.1.%d = \"%s\"\n", i,
+    DEBUG("DEBUG2: prtMarkerColorantValue.1.%d = \"%s\"\n", i,
             (char *)packet->object_value.string.bytes);
 
     for (j = 0; j < num_supplies; j ++)
@@ -835,7 +1076,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
         packet->object_type != CUPS_ASN1_INTEGER)
       return;
 
-    fprintf(stderr, "DEBUG2: prtMarkerSuppliesColorantIndex.1.%d = %d\n", i,
+    DEBUG("DEBUG2: prtMarkerSuppliesColorantIndex.1.%d = %d\n", i,
             packet->object_value.integer);
 
     if (i > num_supplies)
@@ -929,7 +1170,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
 	  break;
     }
 
-    fprintf(stderr, "DEBUG2: prtMarkerSuppliesDescription.1.%d = \"%s\"\n", i,
+    DEBUG("DEBUG2: prtMarkerSuppliesDescription.1.%d = \"%s\"\n", i,
             supplies[i - 1].name);
 
   }
@@ -944,7 +1185,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
         packet->object_type != CUPS_ASN1_INTEGER)
       return;
 
-    fprintf(stderr, "DEBUG2: prtMarkerSuppliesLevel.1.%d = %d\n", i,
+    DEBUG("DEBUG2: prtMarkerSuppliesLevel.1.%d = %d\n", i,
             packet->object_value.integer);
 
     if (i > num_supplies)
@@ -964,7 +1205,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
         packet->object_type != CUPS_ASN1_INTEGER)
       return;
 
-    fprintf(stderr, "DEBUG2: prtMarkerSuppliesMaxCapacity.1.%d = %d\n", i,
+    DEBUG("DEBUG2: prtMarkerSuppliesMaxCapacity.1.%d = %d\n", i,
             packet->object_value.integer);
 
     if (i > num_supplies)
@@ -985,7 +1226,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
         packet->object_type != CUPS_ASN1_INTEGER)
       return;
 
-    fprintf(stderr, "DEBUG2: prtMarkerSuppliesClass.1.%d = %d\n", i,
+    DEBUG("DEBUG2: prtMarkerSuppliesClass.1.%d = %d\n", i,
             packet->object_value.integer);
 
     if (i > num_supplies)
@@ -1004,7 +1245,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
         packet->object_type != CUPS_ASN1_INTEGER)
       return;
 
-    fprintf(stderr, "DEBUG2: prtMarkerSuppliesType.1.%d = %d\n", i,
+    DEBUG("DEBUG2: prtMarkerSuppliesType.1.%d = %d\n", i,
             packet->object_value.integer);
 
     if (i > num_supplies)
@@ -1023,7 +1264,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
         packet->object_type != CUPS_ASN1_INTEGER)
       return;
 
-    fprintf(stderr, "DEBUG2: prtMarkerSuppliesSupplyUnit.1.%d = %d\n", i,
+    DEBUG("DEBUG2: prtMarkerSuppliesSupplyUnit.1.%d = %d\n", i,
             packet->object_value.integer);
 
     if (i > num_supplies)
