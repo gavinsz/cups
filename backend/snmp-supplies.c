@@ -39,11 +39,11 @@
 #define CUPS_SNMP_NONE		0x0000
 #define CUPS_SNMP_CAPACITY	0x0001	/* Supply levels reported as percentages */
 
-//#define DEBUG_ENABLE
+#define DEBUG_ENABLE
 #ifdef    DEBUG_ENABLE
-#define DEBUG(fmt,args...)    printf(fmt ,##args)
+#define SNMPDEBUG(fmt,args...)    printf(fmt ,##args)
 #else
-#define DEBUG(fmt,args...)
+#define SNMPDEBUG(fmt,args...)
 #endif    /* DEBUG */
 
 
@@ -330,14 +330,14 @@ backendSNMPSupplies(
         strlcpy(ptr, "-1", sizeof(value) - (size_t)(ptr - value));
     }
 
-    DEBUG("ATTR: marker-levels=%s\n", value);
+    SNMPDEBUG("ATTR: marker-levels=%s\n", value);
 
     if (supply_state < 0)
       change_state = 0xffff;
     else
       change_state = supply_state ^ new_supply_state;
 
-    DEBUG("DEBUG: new_supply_state=%x, change_state=%x\n",
+    SNMPDEBUG("DEBUG: new_supply_state=%x, change_state=%x\n",
             new_supply_state, change_state);
 
     for (i = 0;
@@ -345,7 +345,7 @@ backendSNMPSupplies(
          i ++)
       if (change_state & supply_states[i].bit)
       {
-	DEBUG("STATE: %c%s\n",
+	SNMPDEBUG("STATE: %c%s\n",
 		(new_supply_state & supply_states[i].bit) ? '+' : '-',
 		supply_states[i].keyword);
       }
@@ -378,7 +378,7 @@ backendSNMPSupplies(
     else
       change_state = current_state ^ new_state;
 
-    DEBUG("DEBUG: new_state=%x, change_state=%x\n", new_state,
+    SNMPDEBUG("DEBUG: new_state=%x, change_state=%x\n", new_state,
             change_state);
 
     for (i = 0;
@@ -386,7 +386,7 @@ backendSNMPSupplies(
          i ++)
       if (change_state & printer_states[i].bit)
       {
-	DEBUG("STATE: %c%s\n",
+	SNMPDEBUG("STATE: %c%s\n",
 		(new_state & printer_states[i].bit) ? '+' : '-',
 		printer_states[i].keyword);
       }
@@ -556,14 +556,14 @@ backendSNMPGetState(
         strlcpy(ptr, "-1", sizeof(value) - (size_t)(ptr - value));
     }
 
-    DEBUG("ATTR: marker-levels=%s\n", value);
+    SNMPDEBUG("ATTR: marker-levels=%s\n", value);
 
     if (supply_state < 0)
       change_state = 0xffff;
     else
       change_state = supply_state ^ new_supply_state;
 
-    DEBUG("DEBUG: new_supply_state=%x, change_state=%x\n",
+    SNMPDEBUG("DEBUG: new_supply_state=%x, change_state=%x\n",
             new_supply_state, change_state);
 
     for (i = 0;
@@ -571,7 +571,7 @@ backendSNMPGetState(
          i ++)
       if (change_state & supply_states[i].bit)
       {
-    	  DEBUG("STATE: %c%s\n",
+    	  SNMPDEBUG("STATE: %c%s\n",
     			(new_supply_state & supply_states[i].bit) ? '+' : '-',
     			supply_states[i].keyword);
 			if ((NULL != new_supply_state_str) &&
@@ -608,7 +608,7 @@ backendSNMPGetState(
     else
       change_state = current_state ^ new_state;
 
-    DEBUG("DEBUG: new_state=%x, change_state=%x\n", new_state,
+    SNMPDEBUG("DEBUG: new_state=%x, change_state=%x\n", new_state,
             change_state);
 
     for (i = 0;
@@ -616,7 +616,7 @@ backendSNMPGetState(
          i ++)
       if (change_state & printer_states[i].bit)
       {
-	DEBUG("STATE: %c%s\n",
+	SNMPDEBUG("STATE: %c%s\n",
 		(new_state & printer_states[i].bit) ? '+' : '-',
 		printer_states[i].keyword);
 		if ((NULL != new_state_str) &&
@@ -789,7 +789,7 @@ backend_init_supplies(
     strlcpy(description, (char *)packet.object_value.string.bytes,
             sizeof(description));
 
-  DEBUG("DEBUG2: hrDeviceDesc=\"%s\"\n", description);
+  SNMPDEBUG("DEBUG2: hrDeviceDesc=\"%s\"\n", description);
 
  /*
   * See if we have already queried this device...
@@ -859,12 +859,12 @@ backend_init_supplies(
     if (!_cupsSNMPRead(snmp_fd, &packet, CUPS_SUPPLY_TIMEOUT) ||
 	packet.object_type != CUPS_ASN1_INTEGER)
     {
-        DEBUG("DEBUG: prtGeneralCurrentLocalization type is %x, expected %x!\n",
+        SNMPDEBUG("DEBUG: prtGeneralCurrentLocalization type is %x, expected %x!\n",
 	      packet.object_type, CUPS_ASN1_INTEGER);
       return;
     }
 
-    DEBUG("DEBUG2: prtGeneralCurrentLocalization=%d\n",
+    SNMPDEBUG("DEBUG2: prtGeneralCurrentLocalization=%d\n",
             packet.object_value.integer);
 
     _cupsSNMPCopyOID(oid, prtLocalizationCharacterSet, CUPS_SNMP_MAX_OID);
@@ -879,13 +879,13 @@ backend_init_supplies(
     if (!_cupsSNMPRead(snmp_fd, &packet, CUPS_SUPPLY_TIMEOUT) ||
 	packet.object_type != CUPS_ASN1_INTEGER)
     {
-      DEBUG(
+      SNMPDEBUG(
               "DEBUG: prtLocalizationCharacterSet type is %x, expected %x!\n",
 	      packet.object_type, CUPS_ASN1_INTEGER);
       return;
     }
 
-    DEBUG("DEBUG2: prtLocalizationCharacterSet=%d\n",
+    SNMPDEBUG("DEBUG2: prtLocalizationCharacterSet=%d\n",
 	    packet.object_value.integer);
     charset = packet.object_value.integer;
   }
@@ -946,7 +946,7 @@ backend_init_supplies(
     strlcpy(ptr, supplies[i].color, sizeof(value) - (size_t)(ptr - value));
   }
 
-  DEBUG("ATTR: marker-colors=%s\n", value);
+  SNMPDEBUG("ATTR: marker-colors=%s\n", value);
 
  /*
   * Output the marker-names attribute (the double quoting is necessary to deal
@@ -977,7 +977,7 @@ backend_init_supplies(
 
   *ptr = '\0';
 
-  DEBUG("ATTR: marker-names=%s\n", value);
+  SNMPDEBUG("ATTR: marker-names=%s\n", value);
 
  /*
   * Output the marker-types attribute...
@@ -996,7 +996,7 @@ backend_init_supplies(
       strlcpy(ptr, types[type - CUPS_TC_other], sizeof(value) - (size_t)(ptr - value));
   }
 
-  DEBUG("ATTR: marker-types=%s\n", value);
+  SNMPDEBUG("ATTR: marker-types=%s\n", value);
 }
 
 
@@ -1050,7 +1050,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
 
     i = packet->object_name[prtMarkerColorantValueOffset];
 
-    DEBUG("DEBUG2: prtMarkerColorantValue.1.%d = \"%s\"\n", i,
+    SNMPDEBUG("DEBUG2: prtMarkerColorantValue.1.%d = \"%s\"\n", i,
             (char *)packet->object_value.string.bytes);
 
     for (j = 0; j < num_supplies; j ++)
@@ -1076,7 +1076,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
         packet->object_type != CUPS_ASN1_INTEGER)
       return;
 
-    DEBUG("DEBUG2: prtMarkerSuppliesColorantIndex.1.%d = %d\n", i,
+    SNMPDEBUG("DEBUG2: prtMarkerSuppliesColorantIndex.1.%d = %d\n", i,
             packet->object_value.integer);
 
     if (i > num_supplies)
@@ -1170,7 +1170,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
 	  break;
     }
 
-    DEBUG("DEBUG2: prtMarkerSuppliesDescription.1.%d = \"%s\"\n", i,
+    SNMPDEBUG("DEBUG2: prtMarkerSuppliesDescription.1.%d = \"%s\"\n", i,
             supplies[i - 1].name);
 
   }
@@ -1185,7 +1185,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
         packet->object_type != CUPS_ASN1_INTEGER)
       return;
 
-    DEBUG("DEBUG2: prtMarkerSuppliesLevel.1.%d = %d\n", i,
+    SNMPDEBUG("DEBUG2: prtMarkerSuppliesLevel.1.%d = %d\n", i,
             packet->object_value.integer);
 
     if (i > num_supplies)
@@ -1205,7 +1205,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
         packet->object_type != CUPS_ASN1_INTEGER)
       return;
 
-    DEBUG("DEBUG2: prtMarkerSuppliesMaxCapacity.1.%d = %d\n", i,
+    SNMPDEBUG("DEBUG2: prtMarkerSuppliesMaxCapacity.1.%d = %d\n", i,
             packet->object_value.integer);
 
     if (i > num_supplies)
@@ -1226,7 +1226,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
         packet->object_type != CUPS_ASN1_INTEGER)
       return;
 
-    DEBUG("DEBUG2: prtMarkerSuppliesClass.1.%d = %d\n", i,
+    SNMPDEBUG("DEBUG2: prtMarkerSuppliesClass.1.%d = %d\n", i,
             packet->object_value.integer);
 
     if (i > num_supplies)
@@ -1245,7 +1245,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
         packet->object_type != CUPS_ASN1_INTEGER)
       return;
 
-    DEBUG("DEBUG2: prtMarkerSuppliesType.1.%d = %d\n", i,
+    SNMPDEBUG("DEBUG2: prtMarkerSuppliesType.1.%d = %d\n", i,
             packet->object_value.integer);
 
     if (i > num_supplies)
@@ -1264,7 +1264,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
         packet->object_type != CUPS_ASN1_INTEGER)
       return;
 
-    DEBUG("DEBUG2: prtMarkerSuppliesSupplyUnit.1.%d = %d\n", i,
+    SNMPDEBUG("DEBUG2: prtMarkerSuppliesSupplyUnit.1.%d = %d\n", i,
             packet->object_value.integer);
 
     if (i > num_supplies)
