@@ -11,6 +11,8 @@
  * Include necessary headers.
  */
 
+#include <stdlib.h>
+#include <stdio.h>
 #include "backend-private.h"
 
 #define CUPS_MAX_SUPPLIES	32
@@ -31,17 +33,17 @@ main(int  argc,				/* I - Number of command-line args */
     char marker_levels[CUPS_MAX_SUPPLIES * 4] = {0};
 
     if (argc != 2){
-        puts("Usage: printer_status ip-or-hostname");
+        printf("Usage: printer_status ip-or-hostname");
         return (1);
     }
 
     if ((host = httpAddrGetList(argv[1], AF_UNSPEC, "9100")) == NULL){
-        perror("httpAddrGetList failed");
+        printf("httpAddrGetList failed");
         return (1);
     }
 
     if ((snmp_fd = _cupsSNMPOpen(host->addr.addr.sa_family)) < 0){
-        perror("_cupsSNMPOpen failed");
+        printf("_cupsSNMPOpen failed");
         return (1);
     }
 
@@ -60,7 +62,7 @@ main(int  argc,				/* I - Number of command-line args */
             "printer_state=%d, "
             "new_supply_str=%s, "
             "new_state_str=%s, "
-            "marker_levels=%s)\n",
+            "marker_levels=%s\n",
             page_count < 0 || printer_state < CUPS_TC_other || printer_state > CUPS_TC_warmup ? "fail" : "ok",
             page_count,
             printer_state,

@@ -39,7 +39,7 @@
 #define CUPS_SNMP_NONE		0x0000
 #define CUPS_SNMP_CAPACITY	0x0001	/* Supply levels reported as percentages */
 
-#define DEBUG_ENABLE
+//#define DEBUG_ENABLE
 #ifdef    DEBUG_ENABLE
 #define SNMPDEBUG(fmt,args...)    printf(fmt ,##args)
 #else
@@ -205,8 +205,8 @@ static const backend_state_t supply_states[] =
 
 static void	backend_init_supplies(int snmp_fd, http_addr_t *addr);
 static void	backend_walk_cb(cups_snmp_t *packet, void *data);
-static void	utf16_to_utf8(cups_utf8_t *dst, const unsigned char *src,
-			      size_t srcsize, size_t dstsize, int le);
+//static void	utf16_to_utf8(cups_utf8_t *dst, const unsigned char *src,
+//			      size_t srcsize, size_t dstsize, int le);
 
 
 /*
@@ -465,9 +465,9 @@ backendSNMPGetState(
 		new_state,		/* New state value */
 		change_state,		/* State change */
 		new_supply_state = 0;	/* Supply state */
-    //char	value[CUPS_MAX_SUPPLIES * 4];
+    char	value[CUPS_MAX_SUPPLIES * 4] = {0};
 					/* marker-levels value string */
-        char *value = marker_levels;
+        //char *value = marker_levels;
 		char *ptr;			/* Pointer into value string */
     cups_snmp_t	packet;			/* SNMP response packet */
 
@@ -477,6 +477,17 @@ backendSNMPGetState(
 
     for (i = 0, ptr = value; i < num_supplies; i ++, ptr += strlen(ptr))
     {
+        SNMPDEBUG("mark name=%s|type=%d|sclass=%d|level=%d|max_capacity=%d|colorant=%d\r\n",
+                        supplies[i].name,
+                        supplies[i].type,
+                        supplies[i].sclass,
+                        supplies[i].level,
+                        supplies[i].max_capacity,
+                        supplies[i].colorant);
+      if (supplies[i].level < 0){
+          supplies[i].level = 0;
+      }
+
       if (supplies[i].max_capacity > 0 && supplies[i].level >= 0)
 	percent = 100 * supplies[i].level / supplies[i].max_capacity;
       else if (supplies[i].level >= 0 && supplies[i].level <= 100 &&
@@ -488,6 +499,7 @@ backendSNMPGetState(
       if (supplies[i].sclass == CUPS_TC_receptacleThatIsFilled)
         percent = 100 - percent;
 
+      SNMPDEBUG("percent=%d\r\n", percent);
       if (percent <= 5)
       {
         switch (supplies[i].type)
@@ -545,18 +557,21 @@ backendSNMPGetState(
               break;
         }
       }
+      //SNMPDEBUG("new_supply_state=%d\r\n", new_supply_state);
 
       if (i)
-        *ptr++ = ',';
+        *ptr++ = '|';
 
       if ((supplies[i].max_capacity > 0 || (quirks & CUPS_SNMP_CAPACITY)) &&
           supplies[i].level >= 0)
-        snprintf(ptr, sizeof(value) - (size_t)(ptr - value), "%d", percent);
+        snprintf(ptr, sizeof(value) - (size_t)(ptr - value), "%s:%d", supplies[i].name, percent);
       else
-        strlcpy(ptr, "-1", sizeof(value) - (size_t)(ptr - value));
+        snprintf(ptr, sizeof(value) - (size_t)(ptr - value), "%s:-1", supplies[i].name);
+        //strlcpy(ptr, "-1", sizeof(value) - (size_t)(ptr - value));
     }
 
     SNMPDEBUG("ATTR: marker-levels=%s\n", value);
+    strncpy(marker_levels, value, strlen(value));
 
     if (supply_state < 0)
       change_state = 0xffff;
@@ -1063,6 +1078,8 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
 	    strlcpy(supplies[j].color, colors[k][1], sizeof(supplies[j].color));
 	    break;
 	  }
+	    strlcpy(supplies[j].name, (char *)packet->object_value.string.bytes,
+	            sizeof(supplies[j].name));
       }
   }
   else if (_cupsSNMPIsOIDPrefixed(packet, prtMarkerSuppliesColorantIndex))
@@ -1097,7 +1114,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
 
     if (i > num_supplies)
       num_supplies = i;
-
+#if 0
     switch (charset)
     {
       case CUPS_TC_csASCII :
@@ -1169,6 +1186,7 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
 	  }
 	  break;
     }
+#endif
 
     SNMPDEBUG("DEBUG2: prtMarkerSuppliesDescription.1.%d = \"%s\"\n", i,
             supplies[i - 1].name);
@@ -1280,58 +1298,58 @@ backend_walk_cb(cups_snmp_t *packet,	/* I - SNMP packet */
  * 'utf16_to_utf8()' - Convert UTF-16 text to UTF-8.
  */
 
-static void
-utf16_to_utf8(
-    cups_utf8_t         *dst,		/* I - Destination buffer */
-    const unsigned char *src,		/* I - Source string */
-    size_t		srcsize,	/* I - Size of source string */
-    size_t              dstsize,	/* I - Size of destination buffer */
-    int                 le)		/* I - Source is little-endian? */
-{
-  cups_utf32_t	ch,			/* Current character */
-		temp[CUPS_SNMP_MAX_STRING],
-					/* UTF-32 string */
-		*ptr;			/* Pointer into UTF-32 string */
-
-
-  for (ptr = temp; srcsize >= 2;)
-  {
-    if (le)
-      ch = (cups_utf32_t)(src[0] | (src[1] << 8));
-    else
-      ch = (cups_utf32_t)((src[0] << 8) | src[1]);
-
-    src += 2;
-    srcsize -= 2;
-
-    if (ch >= 0xd800 && ch <= 0xdbff && srcsize >= 2)
-    {
-     /*
-      * Multi-word UTF-16 char...
-      */
-
-      cups_utf32_t lch;			/* Lower word */
-
-
-      if (le)
-	lch = (cups_utf32_t)(src[0] | (src[1] << 8));
-      else
-	lch = (cups_utf32_t)((src[0] << 8) | src[1]);
-
-      if (lch >= 0xdc00 && lch <= 0xdfff)
-      {
-	src += 2;
-	srcsize -= 2;
-
-	ch = (((ch & 0x3ff) << 10) | (lch & 0x3ff)) + 0x10000;
-      }
-    }
-
-    if (ptr < (temp + CUPS_SNMP_MAX_STRING - 1))
-      *ptr++ = ch;
-  }
-
-  *ptr = '\0';
-
-  cupsUTF32ToUTF8(dst, temp, (int)dstsize);
-}
+//static void
+//utf16_to_utf8(
+//    cups_utf8_t         *dst,		/* I - Destination buffer */
+//    const unsigned char *src,		/* I - Source string */
+//    size_t		srcsize,	/* I - Size of source string */
+//    size_t              dstsize,	/* I - Size of destination buffer */
+//    int                 le)		/* I - Source is little-endian? */
+//{
+//  cups_utf32_t	ch,			/* Current character */
+//		temp[CUPS_SNMP_MAX_STRING],
+//					/* UTF-32 string */
+//		*ptr;			/* Pointer into UTF-32 string */
+//
+//
+//  for (ptr = temp; srcsize >= 2;)
+//  {
+//    if (le)
+//      ch = (cups_utf32_t)(src[0] | (src[1] << 8));
+//    else
+//      ch = (cups_utf32_t)((src[0] << 8) | src[1]);
+//
+//    src += 2;
+//    srcsize -= 2;
+//
+//    if (ch >= 0xd800 && ch <= 0xdbff && srcsize >= 2)
+//    {
+//     /*
+//      * Multi-word UTF-16 char...
+//      */
+//
+//      cups_utf32_t lch;			/* Lower word */
+//
+//
+//      if (le)
+//	lch = (cups_utf32_t)(src[0] | (src[1] << 8));
+//      else
+//	lch = (cups_utf32_t)((src[0] << 8) | src[1]);
+//
+//      if (lch >= 0xdc00 && lch <= 0xdfff)
+//      {
+//	src += 2;
+//	srcsize -= 2;
+//
+//	ch = (((ch & 0x3ff) << 10) | (lch & 0x3ff)) + 0x10000;
+//      }
+//    }
+//
+//    if (ptr < (temp + CUPS_SNMP_MAX_STRING - 1))
+//      *ptr++ = ch;
+//  }
+//
+//  *ptr = '\0';
+//
+//  cupsUTF32ToUTF8(dst, temp, (int)dstsize);
+//}
